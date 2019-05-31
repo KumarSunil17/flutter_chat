@@ -1,12 +1,14 @@
-import 'package:flutter_chat/main.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_database/ui/firebase_animated_list.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat/data_models/User.dart';
+import 'package:flutter_chat/main.dart';
 import 'package:flutter_chat/pages/login_page.dart';
 import 'package:flutter_chat/pages/personal_chat_page.dart';
 import 'package:flutter_chat/pages/profile_page.dart';
-import 'package:firebase_database/ui/firebase_animated_list.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_chat/ui_components/Utils.dart';
 import 'package:flutter_chat/ui_components/toast.dart';
 import 'package:onesignal/onesignal.dart';
 
@@ -17,6 +19,8 @@ class Choice {
   final IconData icon;
 }
 
+User currentUser;
+
 class AllUsersPage extends StatefulWidget {
   @override
   _AllUsersPageState createState() => _AllUsersPageState();
@@ -24,7 +28,6 @@ class AllUsersPage extends StatefulWidget {
 
 class _AllUsersPageState extends State<AllUsersPage> {
   DatabaseReference _userRef;
-  User _currentUser;
   String _currUid;
 
   List<Choice> choices = const <Choice>[
@@ -34,59 +37,111 @@ class _AllUsersPageState extends State<AllUsersPage> {
 
   bool _isLoading = false;
 
-    Future<Null> _handleSignOut() async {
-      this.setState(() {
-        _isLoading = true;
-      });
+  Future<Null> _handleSignOut() async {
+    showCupertinoDialog(
+        context: context,
+        builder: (context) {
+          var _width = MediaQuery.of(context).size.width;
+          return Dialog(
+            backgroundColor: Theme.of(context).primaryColor,
+            insetAnimationCurve: Curves.fastOutSlowIn,
+            insetAnimationDuration: Duration(milliseconds: 400),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              children: <Widget>[
+                Padding(
+                  padding: EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0),
+                  child: Text(
+                    'Are you sure to signout?',
+                    style: TextStyle(
+                      fontSize: 18.0,
+                      color: Theme.of(context).textSelectionColor,
+                    ),
+                  ),
+                ),
+                Wrap(
+                  direction: Axis.horizontal,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 15.0,
+                  children: <Widget>[
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        vertical: 20.0,
+                      ),
+                      width: _width / 4,
+                      child: buttons(context, "Cancel", () {
+                        Navigator.of(context).pop();
+                      }),
+                    ),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        vertical: 20.0,
+                      ),
+                      width: _width / 4,
+                      child: buttons(context, "Yes", () async {
+                        this.setState(() {
+                          _isLoading = true;
+                        });
+                        await auth.signOut().then((a) async {
+                          await googleSignIn.signOut().then((account) {
+                            this.setState(() {
+                              _isLoading = false;
+                            });
 
-      await auth.signOut().then((a) async{
-        await googleSignIn.signOut().then((account){
-          this.setState(() {
-            _isLoading = false;
-          });
-
-          Navigator.of(context)
-              .pushAndRemoveUntil(MaterialPageRoute(builder: (context) => LoginPage()), (Route<dynamic> route) => false);
+                            Navigator.of(context).pushAndRemoveUntil(
+                                MaterialPageRoute(
+                                    builder: (context) => LoginPage()),
+                                (Route<dynamic> route) => false);
+                          });
+                        });
+                      }),
+                    )
+                  ],
+                ),
+              ],
+            ),
+          );
         });
-      });
   }
+
   void _onItemMenuPress(Choice choice) {
     if (choice.title == 'Log out') {
       _handleSignOut();
     } else {
-      Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(_currentUser)));
+      Navigator.of(context).push(CupertinoPageRoute(
+          builder: (BuildContext context) => ProfilePage(currentUser)));
     }
   }
 
   @override
   void initState() {
     super.initState();
-    getCurrentUser().then((uid){
+    getCurrentUser().then((uid) {
       _currUid = uid;
     });
     _userRef = FirebaseDatabase.instance.reference().child('users');
 
-    OneSignal.shared.setNotificationReceivedHandler((notification){
+    OneSignal.shared.setNotificationReceivedHandler((notification) {
       String uid = notification.payload.additionalData["userid"];
-      _userRef.child(uid).onValue.listen((e){
-        Toast.show("New Message from "+e.snapshot.value["name"], context);
+      _userRef.child(uid).onValue.listen((e) {
+        Toast.show("New Message from " + e.snapshot.value["name"], context);
       });
     });
-    OneSignal.shared.setNotificationOpenedHandler((result) async{
+    OneSignal.shared.setNotificationOpenedHandler((result) async {
       String uid = result.notification.payload.additionalData["userid"];
-      _userRef.child(uid).onValue.listen((event){
+      _userRef.child(uid).onValue.listen((event) {
         User _user = User(
             name: event.snapshot.value["name"],
             email: event.snapshot.value['email'],
             photoURL: event.snapshot.value['photoUrl'],
             uid: event.snapshot.key,
-            playerID: event.snapshot.value['playerid']
-        );
+            playerID: event.snapshot.value['playerid']);
         print('notification_name${_user.name}');
-        if(_user != null){
-          Navigator.of(context).push(
-              MaterialPageRoute(builder: (BuildContext context) => PersonalChatPage(user: _user,))
-          );
+        if (_user != null) {
+          Navigator.of(context).push(MaterialPageRoute(
+              builder: (BuildContext context) => PersonalChatPage(
+                    user: _user,
+                  )));
         }
       });
     });
@@ -98,27 +153,34 @@ class _AllUsersPageState extends State<AllUsersPage> {
         email: snapshot.value['email'],
         photoURL: snapshot.value['photoUrl'],
         uid: snapshot.key,
-        playerID: snapshot.value['playerid']
-    );
+        playerID: snapshot.value['playerid']);
 
     if (_currUid == snapshot.key) {
-      _currentUser = _user;
+      currentUser = _user;
       return Container();
     } else {
       return ListTile(
-        onTap: (){
-          Navigator.of(context).push(
-              MaterialPageRoute(builder: (BuildContext context) => PersonalChatPage(user: _user,))
-          );
+        onTap: () {
+          Navigator.push(
+              context,
+              CupertinoPageRoute(
+                  builder: (context) => PersonalChatPage(
+                        user: _user,
+                      )));
         },
-        title: Text(_user.name, style: TextStyle(fontSize: 18.0, color: Colors.white),),
-        subtitle: Text(_user.email, style: TextStyle(color: Colors.white70),),
-        leading:  Material(
+        title: Text(
+          _user.name,
+          style: TextStyle(fontSize: 18.0, color: Colors.white),
+        ),
+        subtitle: Text(
+          _user.email,
+          style: TextStyle(color: Colors.white70),
+        ),
+        leading: Material(
           child: CachedNetworkImage(
-            errorWidget: (context, error, object){
+            errorWidget: (context, error, object) {
               return Container(
-                child: CircularProgressIndicator(
-                ),
+                child: CircularProgressIndicator(),
                 width: 50.0,
                 height: 50.0,
                 padding: EdgeInsets.all(15.0),
@@ -161,7 +223,9 @@ class _AllUsersPageState extends State<AllUsersPage> {
                         ),
                         Text(
                           choice.title,
-                          style: TextStyle(color: Theme.of(context).primaryColorLight,),
+                          style: TextStyle(
+                            color: Theme.of(context).primaryColorLight,
+                          ),
                         ),
                       ],
                     ));
@@ -173,15 +237,17 @@ class _AllUsersPageState extends State<AllUsersPage> {
       body: Center(
         child: Material(
           color: Theme.of(context).backgroundColor,
-          child: _isLoading ? Center(child: CircularProgressIndicator())
-              :
-          FirebaseAnimatedList(
-            query: _userRef,
-            itemBuilder: (BuildContext context, DataSnapshot snapshot,
-                Animation<double> animation, int index) {
-              return snapshot!= null ? buildItem(context, snapshot): Center(child: CircularProgressIndicator());
-            },
-          ),
+          child: _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : FirebaseAnimatedList(
+                  query: _userRef,
+                  itemBuilder: (BuildContext context, DataSnapshot snapshot,
+                      Animation<double> animation, int index) {
+                    return snapshot != null
+                        ? buildItem(context, snapshot)
+                        : Center(child: CircularProgressIndicator());
+                  },
+                ),
         ),
       ),
     );
